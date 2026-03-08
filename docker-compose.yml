@@ -1,0 +1,99 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: doc-search-app
+    ports:
+      - '3000:3000'
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USERNAME=docsearch
+      - DB_PASSWORD=docsearch_pass
+      - DB_NAME=docsearch
+      - ELASTICSEARCH_NODE=http://elasticsearch:9200
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - RATE_LIMIT_TTL=60
+      - RATE_LIMIT_MAX=100
+      - CACHE_TTL=300
+    depends_on:
+      postgres:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - docsearch-net
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: doc-search-postgres
+    environment:
+      POSTGRES_USER: docsearch
+      POSTGRES_PASSWORD: docsearch_pass
+      POSTGRES_DB: docsearch
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U docsearch']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - docsearch-net
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
+    container_name: doc-search-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - xpack.security.http.ssl.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      - cluster.name=docsearch-cluster
+    ports:
+      - '9200:9200'
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -f http://localhost:9200/_cluster/health || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - docsearch-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: doc-search-redis
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    networks:
+      - docsearch-net
+
+volumes:
+  postgres_data:
+  elasticsearch_data:
+  redis_data:
+
+networks:
+  docsearch-net:
+    driver: bridge
